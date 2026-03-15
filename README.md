@@ -74,7 +74,7 @@ meteor_live_production/
 ### 1. Clone & install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/meteorlive.git
+git clone https://github.com/aboyahia70/meteorlive.git
 cd meteor_live_production
 pip install -r requirements.txt
 ```
