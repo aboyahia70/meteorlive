@@ -6,7 +6,7 @@
 
 ## [0:00 – 0:20]  The problem
 
-SCREEN: Blank dark screen, then MeteorLive loads at localhost:9090
+SCREEN: Blank dark screen, then MeteorLive loads at URL: https://meteorlive-50574840260.us-central1.run.app
 
 VOICEOVER:
 "Over 1.5 billion people are learning English right now.
