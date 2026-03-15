@@ -1,0 +1,9 @@
+{
+  "scene_id": "reactor_emergency_01",
+  "location": "Sub-orbital Plasma Vault",
+  "agent_profile": {
+    "name": "Commander Vane",
+    "temperament": "Frantic/Military"
+  },
+  "max_risk": 10
+}
