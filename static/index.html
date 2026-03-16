@@ -1296,15 +1296,25 @@ function connect() {
         if (event.data instanceof ArrayBuffer) {
             chunkCount++;
             document.getElementById('chunkCount').innerText = chunkCount;
-            document.getElementById('aiStatus').innerText = 'Speaking...';
-            document.getElementById('aiStatus').className = 'stat-value blue';
+            if (!bargeInActive) {
+                document.getElementById('aiStatus').innerText = 'Speaking...';
+                document.getElementById('aiStatus').className = 'stat-value blue';
+            }
             playPCMBuffer(event.data);
             return;
         }
         // Text = JSON
         const data = JSON.parse(event.data);
         if (data.type === 'ping') { socket.send(JSON.stringify({ type: 'pong' })); return; }
-        if (data.type === 'connected' || data.type === 'reconnecting') { return; }
+        if (data.type === 'connected') { return; }
+        if (data.type === 'reconnecting') {
+            document.getElementById('aiStatus').innerText = 'Reconnecting...';
+            document.getElementById('aiStatus').className = 'stat-value amber';
+            document.getElementById('connStatus').innerText = 'Reconnecting';
+            document.getElementById('connStatus').className = 'stat-value amber';
+            addMessage('System', '🔄 Session reconnecting — please wait a moment...', 'system');
+            return;
+        }
         if (data.type === 'error') { addMessage('System', data.content, 'system'); return; }
         // Meteo speaking — build transcript word by word
         if (data.type === 'output_transcription') {
@@ -1319,6 +1329,13 @@ function connect() {
         if (data.type === 'agent_response') {
             hideTyping();
             addMessage('Meteo', data.content, 'ai', 'add', true);
+        }
+        // Meteo finished speaking — reset audio playing flag
+        if (data.type === 'turn_complete') {
+            isAudioPlaying = false;
+            setAvatarSpeaking(false);
+            document.getElementById('aiStatus').innerText = 'Standby';
+            document.getElementById('aiStatus').className = 'stat-value amber';
         }
     };
     socket.onclose = () => {
@@ -1479,8 +1496,8 @@ async function startMic() {
         source.connect(workletNode);
 
         let bargeInCount = 0;
-        const BARGE_THRESHOLD = 0.08;
-        const BARGE_FRAMES    = 4;
+        const BARGE_THRESHOLD = 0.03;  // lowered — easier to trigger
+        const BARGE_FRAMES    = 2;     // fewer frames needed — faster response
         workletNode.port.onmessage = (e) => {
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
             const { int16, rms } = e.data;
@@ -1794,6 +1811,7 @@ let sharedAudioCtx = null;
 let playbackNode = null;
 let isAudioPlaying = false;
 let playbackWorkletReady = false;
+let bargeInActive = false;        // true = ignore incoming audio after interrupt
 
 const aiVizEl = document.getElementById('aiViz');
 for (let i = 0; i < 20; i++) {
@@ -1838,6 +1856,8 @@ function stopAIAudio() {
         playbackNode.port.postMessage('interrupt');
     }
     isAudioPlaying = false;
+    bargeInActive = true;
+    setTimeout(() => { bargeInActive = false; }, 1500); // ignore audio for 1.5s after interrupt
     document.getElementById('aiStatus').innerText = 'Interrupted';
     document.getElementById('aiStatus').className = 'stat-value amber';
     document.querySelectorAll('.viz-bar.ai').forEach(b => b.style.height = '2px');
@@ -1851,6 +1871,7 @@ function stopAIAudio() {
 }
 
 async function playPCMBuffer(arrayBuffer) {
+    if (bargeInActive) return;  // ignore audio arriving after barge-in
     try {
         const ctx = await getAudioContext();
         if (!ctx) return; // AudioContext not ready yet (no user gesture)

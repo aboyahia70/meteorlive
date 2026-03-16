@@ -12,9 +12,7 @@ from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
-API_KEY = os.getenv("GEMINI_API_KEY")
-if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is not set")
+API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("MeteorLive.Production")
@@ -46,20 +44,22 @@ async def run_session(client_id: str, user_ws: WebSocket, api_key: str = None, m
         api_key=effective_key,
         http_options={"api_version": "v1alpha"},
     )
-    config = types.LiveConnectConfig(
-        response_modalities=["AUDIO"],
-        system_instruction=SYSTEM_INSTRUCTION,
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-    )
     retry_delay = 1
     connected_at = time.time()
+    session_handle = None
 
     while True:
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            system_instruction=SYSTEM_INSTRUCTION,
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            session_resumption=types.SessionResumptionConfig(handle=session_handle),
+        )
         error_event = asyncio.Event()
         tasks = []
         try:
-            logger.info(f"[{client_id}] Connecting to Gemini...")
+            logger.info(f"[{client_id}] Connecting to Gemini (resume={session_handle is not None})...")
             async with client.aio.live.connect(model=effective_model, config=config) as session:
                 logger.info(f"[{client_id}] ✓ Connected")
                 retry_delay = 1
@@ -129,6 +129,7 @@ async def run_session(client_id: str, user_ws: WebSocket, api_key: str = None, m
 
                 # ── RECEIVE FROM GEMINI ──
                 async def receive_from_gemini():
+                    nonlocal session_handle
                     try:
                         while not error_event.is_set():
                             async for response in session.receive():
@@ -174,6 +175,19 @@ async def run_session(client_id: str, user_ws: WebSocket, api_key: str = None, m
                                         "text": response.text,
                                         "finished": True
                                     })
+                                # Notify frontend when Meteo finishes speaking
+                                if sc and sc.turn_complete:
+                                    await user_ws.send_json({"type": "turn_complete"})
+                                # Save session handle for resumption
+                                if response.session_resumption_update:
+                                    upd = response.session_resumption_update
+                                    if upd.resumable and upd.new_handle:
+                                        session_handle = upd.new_handle
+                                        logger.info(f"[{client_id}] Session handle saved")
+                                # go_away = session ending — reconnect with saved handle
+                                if response.go_away:
+                                    logger.info(f"[{client_id}] goAway — reconnecting with handle")
+                                    error_event.set()
                     except asyncio.CancelledError:
                         pass
                     except Exception as e:
